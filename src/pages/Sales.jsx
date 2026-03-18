@@ -1,0 +1,374 @@
+import React, { useState } from 'react';
+import { Card, CardBody, CardHeader } from '../components/ui/Card';
+import { Button } from '../components/ui/Button';
+import { Input } from '../components/ui/Input';
+import { Select } from '../components/ui/Select';
+import { Table } from '../components/ui/Table';
+import { Modal } from '../components/ui/Modal';
+import { ShoppingCart, DollarSign, Plus, TrendingUp, Search, Calendar } from 'lucide-react';
+import { format } from 'date-fns';
+
+const products = [
+  { id: 1, name: 'Wireless Headphones', price: 99.99, stock: 45 },
+  { id: 2, name: 'Cotton T-Shirt', price: 24.99, stock: 12 },
+  { id: 3, name: 'Coffee Maker', price: 79.99, stock: 5 },
+  { id: 4, name: 'Yoga Mat', price: 29.99, stock: 30 },
+  { id: 5, name: 'Desk Lamp', price: 45.00, stock: 18 },
+];
+
+const initialRecentSales = [
+  {
+    id: 1,
+    product: 'Wireless Headphones',
+    quantity: 2,
+    total: 199.98,
+    date: new Date(),
+  },
+  {
+    id: 2,
+    product: 'Cotton T-Shirt',
+    quantity: 3,
+    total: 74.97,
+    date: new Date(),
+  },
+  {
+    id: 3,
+    product: 'Coffee Maker',
+    quantity: 1,
+    total: 79.99,
+    date: new Date(Date.now() - 86400000), // Yesterday
+  },
+  {
+    id: 4,
+    product: 'Yoga Mat',
+    quantity: 2,
+    total: 59.98,
+    date: new Date(Date.now() - 86400000 * 2), // 2 days ago
+  },
+];
+
+export const Sales = () => {
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [selectedProduct, setSelectedProduct] = useState('');
+  const [quantity, setQuantity] = useState(1);
+  const [price, setPrice] = useState(0);
+  const [recentSales, setRecentSales] = useState(initialRecentSales);
+  
+  // Filter states
+  const [searchTerm, setSearchTerm] = useState('');
+  const [dateFilter, setDateFilter] = useState('all');
+  const [productFilter, setProductFilter] = useState('all');
+
+  const handleProductChange = (e) => {
+    const productId = e.target.value;
+    setSelectedProduct(productId);
+    const product = products.find(p => p.id === parseInt(productId));
+    if (product) {
+      setPrice(product.price);
+    }
+  };
+
+  const total = quantity * price;
+
+  const handleRecordSale = () => {
+    if (!selectedProduct || quantity < 1) return;
+
+    const product = products.find(p => p.id === parseInt(selectedProduct));
+    const newSale = {
+      id: recentSales.length + 1,
+      product: product.name,
+      quantity,
+      total,
+      date: new Date(),
+    };
+
+    setRecentSales([newSale, ...recentSales]);
+    
+    // Reset form and close modal
+    setSelectedProduct('');
+    setQuantity(1);
+    setPrice(0);
+    setIsModalOpen(false);
+  };
+
+  const resetForm = () => {
+    setSelectedProduct('');
+    setQuantity(1);
+    setPrice(0);
+  };
+
+  // Filter sales based on search and filters
+  const filteredSales = recentSales.filter(sale => {
+    // Search filter
+    const matchesSearch = sale.product.toLowerCase().includes(searchTerm.toLowerCase());
+    
+    // Product filter
+    const matchesProduct = productFilter === 'all' || sale.product === productFilter;
+    
+    // Date filter
+    let matchesDate = true;
+    const today = new Date().toDateString();
+    const yesterday = new Date(Date.now() - 86400000).toDateString();
+    
+    if (dateFilter === 'today') {
+      matchesDate = sale.date.toDateString() === today;
+    } else if (dateFilter === 'yesterday') {
+      matchesDate = sale.date.toDateString() === yesterday;
+    } else if (dateFilter === 'thisWeek') {
+      const oneWeekAgo = new Date(Date.now() - 7 * 86400000);
+      matchesDate = sale.date >= oneWeekAgo;
+    }
+    
+    return matchesSearch && matchesProduct && matchesDate;
+  });
+
+  const columns = [
+    { header: 'Product', accessor: 'product' },
+    { header: 'Quantity', accessor: 'quantity' },
+    {
+      header: 'Total',
+      accessor: 'total',
+      cell: (value) => `K${value.toFixed(2)}`,
+    },
+    {
+      header: 'Date',
+      accessor: 'date',
+      cell: (value) => format(value, 'MMM dd, yyyy HH:mm'),
+    },
+  ];
+
+  // Calculate today's stats
+  const today = new Date().toDateString();
+  const todaySales = recentSales.filter(sale => 
+    sale.date.toDateString() === today
+  );
+  const totalSalesToday = todaySales.reduce((sum, sale) => sum + sale.total, 0);
+  const transactionsToday = todaySales.length;
+
+  // Get unique products for filter dropdown
+  const uniqueProducts = ['all', ...new Set(recentSales.map(sale => sale.product))];
+
+  return (
+    <div className="p-6 space-y-6">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">Sales Management</h1>
+          <p className="text-gray-500">Track and record your sales transactions</p>
+        </div>
+        <Button onClick={() => setIsModalOpen(true)} size="lg">
+          <Plus size={18} className="mr-2" />
+          New Sale
+        </Button>
+      </div>
+
+      {/* Today's Summary - Horizontal Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        {/* Total Sales Today */}
+        <Card className="hover:shadow-md transition-shadow">
+          <CardBody>
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-gray-500">Total Sales Today</p>
+                <p className="text-2xl font-bold text-gray-900 mt-1">
+                  K{totalSalesToday.toFixed(2)}
+                </p>
+              </div>
+              <div className="p-1 bg-green-100 rounded-full">
+                <DollarSign className="text-green-600" size={24} />
+              </div>
+            </div>
+          </CardBody>
+        </Card>
+
+        {/* Transactions Today */}
+        <Card className="hover:shadow-md transition-shadow">
+          <CardBody>
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-gray-500">Transactions Today</p>
+                <p className="text-2xl font-bold text-gray-900 mt-1">
+                  {transactionsToday}
+                </p>
+              </div>
+              <div className="p-1 bg-blue-100 rounded-lg">
+                <ShoppingCart className="text-blue-600" size={24} />
+              </div>
+            </div>
+          </CardBody>
+        </Card>
+
+        {/* Average Order Value */}
+        <Card className="hover:shadow-md transition-shadow">
+          <CardBody>
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-gray-500">Avg. Order Value</p>
+                <p className="text-2xl font-bold text-gray-900 mt-1">
+                  K{transactionsToday > 0 
+                    ? (totalSalesToday / transactionsToday).toFixed(2) 
+                    : '0.00'}
+                </p>
+              </div>
+              <div className="p-1 bg-purple-100 rounded-lg">
+                <TrendingUp className="text-purple-600" size={24} />
+              </div>
+            </div>
+          </CardBody>
+        </Card>
+
+        {/* Total Products Sold */}
+        <Card className="hover:shadow-md transition-shadow">
+          <CardBody>
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-gray-500">Products Sold Today</p>
+                <p className="text-2xl font-bold text-gray-900 mt-1">
+                  {todaySales.reduce((sum, sale) => sum + sale.quantity, 0)}
+                </p>
+              </div>
+              <div className="p-1 bg-orange-100 rounded-lg">
+                <ShoppingCart className="text-orange-600" size={24} />
+              </div>
+            </div>
+          </CardBody>
+        </Card>
+      </div>
+
+      {/* Filters */}
+      <Card>
+        <CardBody>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {/* Search */}
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={18} />
+              <Input
+                placeholder="Search by product..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="pl-10"
+              />
+            </div>
+
+            {/* Date Filter */}
+            <Select
+              value={dateFilter}
+              onChange={(e) => setDateFilter(e.target.value)}
+              options={[
+                { value: 'all', label: 'All Dates' },
+                { value: 'today', label: 'Today' },
+                { value: 'yesterday', label: 'Yesterday' },
+                { value: 'thisWeek', label: 'This Week' },
+              ]}
+              icon={<Calendar size={18} />}
+            />
+
+            {/* Product Filter */}
+            <Select
+              value={productFilter}
+              onChange={(e) => setProductFilter(e.target.value)}
+              options={uniqueProducts.map(p => ({ 
+                value: p, 
+                label: p === 'all' ? 'All Products' : p 
+              }))}
+              icon={<ShoppingCart size={18} />}
+            />
+          </div>
+        </CardBody>
+      </Card>
+
+      {/* Recent Sales Table */}
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <h2 className="text-lg font-semibold">Recent Sales</h2>
+            <Button variant="ghost" size="sm">
+              View All
+            </Button>
+          </div>
+        </CardHeader>
+        <CardBody>
+          <Table columns={columns} data={filteredSales} />
+        </CardBody>
+      </Card>
+
+      {/* Record Sale Modal */}
+      <Modal
+        isOpen={isModalOpen}
+        onClose={() => {
+          setIsModalOpen(false);
+          resetForm();
+        }}
+        title="Record New Sale"
+        size="md"
+      >
+        <div className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Select Product
+            </label>
+            <Select
+              value={selectedProduct}
+              onChange={handleProductChange}
+              options={products.map(p => ({
+                value: p.id.toString(),
+                label: `${p.name} - K${p.price} (Stock: ${p.stock})`,
+              }))}
+              placeholder="Choose a product..."
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Quantity
+            </label>
+            <Input
+              type="number"
+              min="1"
+              max={selectedProduct ? products.find(p => p.id === parseInt(selectedProduct))?.stock : 1}
+              value={quantity}
+              onChange={(e) => setQuantity(parseInt(e.target.value) || 1)}
+            />
+            {selectedProduct && (
+              <p className="mt-1 text-xs text-gray-500">
+                Available stock: {products.find(p => p.id === parseInt(selectedProduct))?.stock} units
+              </p>
+            )}
+          </div>
+
+          <div className="bg-gray-50 p-4 rounded-lg">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-gray-600">Price per unit:</span>
+              <span className="font-semibold">K{price.toFixed(2)}</span>
+            </div>
+            <div className="flex items-center justify-between text-lg">
+              <span className="font-semibold">Total:</span>
+              <span className="text-2xl font-bold text-primary-600">
+                K{total.toFixed(2)}
+              </span>
+            </div>
+          </div>
+
+          <div className="flex justify-end gap-3 mt-6">
+            <Button
+              variant="ghost"
+              onClick={() => {
+                setIsModalOpen(false);
+                resetForm();
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleRecordSale}
+              disabled={!selectedProduct || quantity < 1}
+            >
+              <ShoppingCart size={18} className="mr-2" />
+              Record Sale
+            </Button>
+          </div>
+        </div>
+      </Modal>
+    </div>
+  );
+};
