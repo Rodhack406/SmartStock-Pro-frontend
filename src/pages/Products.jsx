@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Card, CardBody, CardHeader, CardFooter } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
@@ -6,64 +6,25 @@ import { Select } from '../components/ui/Select';
 import { Table } from '../components/ui/Table';
 import { Modal } from '../components/ui/Modal';
 import { Badge } from '../components/ui/Badge';
-import { Plus, Search, Edit, Trash2 } from 'lucide-react';
+import { Plus, Search, Edit, Trash2, AlertCircle } from 'lucide-react';
+import { supabase } from '../services/supabase';
+import { useAuth } from '../hooks/AuthContext';
 
-const initialProducts = [
-  {
-    id: 1,
-    name: 'Wireless Headphones',
-    category: 'Electronics',
-    supplier: 'TechCorp',
-    price: 99.99,
-    stock: 45,
-    status: 'Normal',
-  },
-  {
-    id: 2,
-    name: 'Cotton T-Shirt',
-    category: 'Clothing',
-    supplier: 'FashionInc',
-    price: 24.99,
-    stock: 12,
-    status: 'Low',
-  },
-  {
-    id: 3,
-    name: 'Coffee Maker',
-    category: 'Appliances',
-    supplier: 'HomeGoods',
-    price: 79.99,
-    stock: 5,
-    status: 'Critical',
-  },
-  {
-    id: 4,
-    name: 'Yoga Mat',
-    category: 'Sports',
-    supplier: 'FitLife',
-    price: 29.99,
-    stock: 30,
-    status: 'Normal',
-  },
-  {
-    id: 5,
-    name: 'Desk Lamp',
-    category: 'Furniture',
-    supplier: 'OfficePro',
-    price: 45.00,
-    stock: 18,
-    status: 'Normal',
-  },
-];
-
-const categories = ['Electronics', 'Clothing', 'Appliances', 'Sports', 'Furniture'];
-const suppliers = ['TechCorp', 'FashionInc', 'HomeGoods', 'FitLife', 'OfficePro'];
+const categories = ['Electronics', 'Clothing', 'Appliances', 'Sports', 'Furniture', 'Food', 'Books', 'Tools'];
+const suppliers = ['TechCorp', 'FashionInc', 'HomeGoods', 'FitLife', 'OfficePro', 'FoodDistro', 'BookWorld'];
 
 export const Products = () => {
-  const [products, setProducts] = useState(initialProducts);
+  const { user } = useAuth();
+  const [products, setProducts] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [thresholds, setThresholds] = useState({
+    lowStockThreshold: 20,
+    criticalStockThreshold: 10,
+  });
   const [formData, setFormData] = useState({
     name: '',
     description: '',
@@ -73,10 +34,67 @@ export const Products = () => {
     stock: '',
   });
 
+  // Fetch user settings thresholds
+  const fetchThresholds = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('user_settings')
+        .select('low_stock_threshold, critical_stock_threshold')
+        .eq('user_id', user.id)
+        .single();
+
+      if (error && error.code !== 'PGRST116') throw error;
+      
+      if (data) {
+        setThresholds({
+          lowStockThreshold: data.low_stock_threshold || 20,
+          criticalStockThreshold: data.critical_stock_threshold || 10,
+        });
+      }
+    } catch (err) {
+      console.error('Error fetching thresholds:', err);
+    }
+  };
+
+  // Fetch products from Supabase
+  const fetchProducts = async () => {
+    try {
+      setLoading(true);
+      const { data, error } = await supabase
+        .from('products')
+        .select('*')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+      setProducts(data || []);
+    } catch (err) {
+      setError(err.message);
+      console.error('Error fetching products:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (user) {
+      fetchThresholds();
+      fetchProducts();
+    }
+  }, [user]);
+
+  // Calculate status based on stock and thresholds
+  const getProductStatus = (stock) => {
+    if (stock <= 0) return 'Out of Stock';
+    if (stock < thresholds.criticalStockThreshold) return 'Critical';
+    if (stock < thresholds.lowStockThreshold) return 'Low';
+    return 'Normal';
+  };
+
   const filteredProducts = products.filter(product =>
-    product.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    product.category.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    product.supplier.toLowerCase().includes(searchTerm.toLowerCase())
+    product.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    product.category?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    product.supplier?.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
   const handleInputChange = (e) => {
@@ -84,24 +102,40 @@ export const Products = () => {
     setFormData(prev => ({ ...prev, [name]: value }));
   };
 
-  const handleAddProduct = () => {
-    const newProduct = {
-      id: products.length + 1,
-      ...formData,
-      price: parseFloat(formData.price),
-      stock: parseInt(formData.stock),
-      status: parseInt(formData.stock) < 10 ? 'Critical' : parseInt(formData.stock) < 20 ? 'Low' : 'Normal',
-    };
-    setProducts([...products, newProduct]);
-    setIsModalOpen(false);
-    resetForm();
+  const handleAddProduct = async () => {
+    try {
+      setError('');
+      const newProduct = {
+        user_id: user.id,
+        name: formData.name,
+        description: formData.description,
+        category: formData.category,
+        supplier: formData.supplier,
+        price: parseFloat(formData.price),
+        stock: parseInt(formData.stock),
+      };
+
+      const { data, error } = await supabase
+        .from('products')
+        .insert([newProduct])
+        .select();
+
+      if (error) throw error;
+
+      setProducts([data[0], ...products]);
+      setIsModalOpen(false);
+      resetForm();
+    } catch (err) {
+      setError(err.message);
+      console.error('Error adding product:', err);
+    }
   };
 
   const handleEditProduct = (product) => {
     setEditingProduct(product);
     setFormData({
       name: product.name,
-      description: '',
+      description: product.description || '',
       category: product.category,
       supplier: product.supplier,
       price: product.price.toString(),
@@ -110,26 +144,56 @@ export const Products = () => {
     setIsModalOpen(true);
   };
 
-  const handleUpdateProduct = () => {
-    const updatedProducts = products.map(p =>
-      p.id === editingProduct.id
-        ? {
-            ...p,
-            ...formData,
-            price: parseFloat(formData.price),
-            stock: parseInt(formData.stock),
-            status: parseInt(formData.stock) < 10 ? 'Critical' : parseInt(formData.stock) < 20 ? 'Low' : 'Normal',
-          }
-        : p
-    );
-    setProducts(updatedProducts);
-    setIsModalOpen(false);
-    resetForm();
+  const handleUpdateProduct = async () => {
+    try {
+      setError('');
+      const updatedProduct = {
+        name: formData.name,
+        description: formData.description,
+        category: formData.category,
+        supplier: formData.supplier,
+        price: parseFloat(formData.price),
+        stock: parseInt(formData.stock),
+        updated_at: new Date(),
+      };
+
+      const { data, error } = await supabase
+        .from('products')
+        .update(updatedProduct)
+        .eq('id', editingProduct.id)
+        .eq('user_id', user.id)
+        .select();
+
+      if (error) throw error;
+
+      setProducts(products.map(p => 
+        p.id === editingProduct.id ? data[0] : p
+      ));
+      setIsModalOpen(false);
+      resetForm();
+    } catch (err) {
+      setError(err.message);
+      console.error('Error updating product:', err);
+    }
   };
 
-  const handleDeleteProduct = (id) => {
-    if (window.confirm('Are you sure you want to delete this product?')) {
+  const handleDeleteProduct = async (id) => {
+    if (!window.confirm('Are you sure you want to delete this product?')) return;
+
+    try {
+      setError('');
+      const { error } = await supabase
+        .from('products')
+        .delete()
+        .eq('id', id)
+        .eq('user_id', user.id);
+
+      if (error) throw error;
+
       setProducts(products.filter(p => p.id !== id));
+    } catch (err) {
+      setError(err.message);
+      console.error('Error deleting product:', err);
     }
   };
 
@@ -143,15 +207,17 @@ export const Products = () => {
       stock: '',
     });
     setEditingProduct(null);
+    setError('');
   };
 
   const getStatusBadge = (status) => {
     const variants = {
-      Normal: 'success',
-      Low: 'warning',
-      Critical: 'error',
+      'Normal': 'success',
+      'Low': 'warning',
+      'Critical': 'error',
+      'Out of Stock': 'error',
     };
-    return <Badge variant={variants[status]}>{status}</Badge>;
+    return <Badge variant={variants[status] || 'neutral'}>{status}</Badge>;
   };
 
   const columns = [
@@ -161,13 +227,13 @@ export const Products = () => {
     {
       header: 'Price',
       accessor: 'price',
-      cell: (value) => `K${value.toFixed(2)}`,
+      cell: (value) => `K${value?.toFixed(2) || '0.00'}`,
     },
     { header: 'Stock', accessor: 'stock' },
     {
       header: 'Status',
-      accessor: 'status',
-      cell: (value) => getStatusBadge(value),
+      accessor: 'stock',
+      cell: (value) => getStatusBadge(getProductStatus(value)),
     },
     {
       header: 'Actions',
@@ -193,6 +259,14 @@ export const Products = () => {
     },
   ];
 
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-96">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-500"></div>
+      </div>
+    );
+  }
+
   return (
     <div className="p-6 space-y-6">
       {/* Header */}
@@ -206,6 +280,17 @@ export const Products = () => {
           Add Product
         </Button>
       </div>
+
+      {/* Error Message */}
+      {error && (
+        <div className="bg-red-50 border border-red-200 rounded-lg p-4 flex items-start gap-3">
+          <AlertCircle className="text-red-500 mt-0.5" size={18} />
+          <div>
+            <p className="text-sm text-red-700 font-medium">Error</p>
+            <p className="text-sm text-red-600">{error}</p>
+          </div>
+        </div>
+      )}
 
       {/* Search */}
       <Card>
@@ -247,13 +332,14 @@ export const Products = () => {
         <div className="space-y-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              Product Name
+              Product Name *
             </label>
             <Input
               name="name"
               value={formData.name}
               onChange={handleInputChange}
               placeholder="Enter product name"
+              required
             />
           </div>
 
@@ -272,7 +358,7 @@ export const Products = () => {
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
-                Category
+                Category *
               </label>
               <Select
                 name="category"
@@ -280,12 +366,13 @@ export const Products = () => {
                 onChange={handleInputChange}
                 options={categories.map(c => ({ value: c, label: c }))}
                 placeholder="Select category"
+                required
               />
             </div>
 
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
-                Supplier
+                Supplier *
               </label>
               <Select
                 name="supplier"
@@ -293,6 +380,7 @@ export const Products = () => {
                 onChange={handleInputChange}
                 options={suppliers.map(s => ({ value: s, label: s }))}
                 placeholder="Select supplier"
+                required
               />
             </div>
           </div>
@@ -300,7 +388,7 @@ export const Products = () => {
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
-                Price ($)
+                Price (K) *
               </label>
               <Input
                 name="price"
@@ -310,12 +398,13 @@ export const Products = () => {
                 placeholder="0.00"
                 min="0"
                 step="0.01"
+                required
               />
             </div>
 
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
-                Stock Quantity
+                Stock Quantity *
               </label>
               <Input
                 name="stock"
@@ -324,7 +413,11 @@ export const Products = () => {
                 onChange={handleInputChange}
                 placeholder="0"
                 min="0"
+                required
               />
+              <p className="text-xs text-gray-500 mt-1">
+                Status will be: {getProductStatus(parseInt(formData.stock) || 0)}
+              </p>
             </div>
           </div>
 
@@ -340,6 +433,7 @@ export const Products = () => {
             </Button>
             <Button
               onClick={editingProduct ? handleUpdateProduct : handleAddProduct}
+              disabled={!formData.name || !formData.category || !formData.supplier || !formData.price || !formData.stock}
             >
               {editingProduct ? 'Update' : 'Add'} Product
             </Button>

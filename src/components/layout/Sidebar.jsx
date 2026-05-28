@@ -21,7 +21,7 @@ const menuItems = [
   { icon: Box, label: 'Inventory', path: '/inventory' },
   { icon: TrendingUp, label: 'Predictions', path: '/predictions' },
   // { icon: FileText, label: 'Reports', path: '/reports' },
-  // { icon: Settings, label: 'Settings', path: '/settings' },
+  { icon: Settings, label: 'Settings', path: '/settings' },
 ];
 
 export const Sidebar = () => {

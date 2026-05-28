@@ -1,63 +1,76 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Card, CardBody, CardHeader } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
 import { Select } from '../components/ui/Select';
 import { Table } from '../components/ui/Table';
 import { Modal } from '../components/ui/Modal';
-import { ShoppingCart, DollarSign, Plus, TrendingUp, Search, Calendar } from 'lucide-react';
+import { ShoppingCart, DollarSign, Plus, TrendingUp, Search, Calendar, AlertCircle } from 'lucide-react';
 import { format } from 'date-fns';
-
-const products = [
-  { id: 1, name: 'Wireless Headphones', price: 99.99, stock: 45 },
-  { id: 2, name: 'Cotton T-Shirt', price: 24.99, stock: 12 },
-  { id: 3, name: 'Coffee Maker', price: 79.99, stock: 5 },
-  { id: 4, name: 'Yoga Mat', price: 29.99, stock: 30 },
-  { id: 5, name: 'Desk Lamp', price: 45.00, stock: 18 },
-];
-
-const initialRecentSales = [
-  {
-    id: 1,
-    product: 'Wireless Headphones',
-    quantity: 2,
-    total: 199.98,
-    date: new Date(),
-  },
-  {
-    id: 2,
-    product: 'Cotton T-Shirt',
-    quantity: 3,
-    total: 74.97,
-    date: new Date(),
-  },
-  {
-    id: 3,
-    product: 'Coffee Maker',
-    quantity: 1,
-    total: 79.99,
-    date: new Date(Date.now() - 86400000), // Yesterday
-  },
-  {
-    id: 4,
-    product: 'Yoga Mat',
-    quantity: 2,
-    total: 59.98,
-    date: new Date(Date.now() - 86400000 * 2), // 2 days ago
-  },
-];
+import { supabase } from '../services/supabase';
+import { useAuth } from '../hooks/AuthContext';
 
 export const Sales = () => {
+  const { user } = useAuth();
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState('');
   const [quantity, setQuantity] = useState(1);
   const [price, setPrice] = useState(0);
-  const [recentSales, setRecentSales] = useState(initialRecentSales);
+  const [products, setProducts] = useState([]);
+  const [recentSales, setRecentSales] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
   
   // Filter states
   const [searchTerm, setSearchTerm] = useState('');
   const [dateFilter, setDateFilter] = useState('all');
   const [productFilter, setProductFilter] = useState('all');
+
+  // Fetch products from Supabase
+  const fetchProducts = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('products')
+        .select('id, name, price, stock')
+        .eq('user_id', user.id)
+        .gt('stock', 0)
+        .order('name');
+
+      if (error) throw error;
+      setProducts(data || []);
+    } catch (err) {
+      console.error('Error fetching products:', err);
+      setError('Failed to load products');
+    }
+  };
+
+  // Fetch sales from Supabase
+  const fetchSales = async () => {
+    try {
+      setLoading(true);
+      const { data, error } = await supabase
+        .from('sales')
+        .select('*')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false })
+        .limit(50);
+
+      if (error) throw error;
+      setRecentSales(data || []);
+    } catch (err) {
+      console.error('Error fetching sales:', err);
+      setError('Failed to load sales');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (user) {
+      fetchProducts();
+      fetchSales();
+    }
+  }, [user]);
 
   const handleProductChange = (e) => {
     const productId = e.target.value;
@@ -70,40 +83,71 @@ export const Sales = () => {
 
   const total = quantity * price;
 
-  const handleRecordSale = () => {
+  const handleRecordSale = async () => {
     if (!selectedProduct || quantity < 1) return;
 
     const product = products.find(p => p.id === parseInt(selectedProduct));
-    const newSale = {
-      id: recentSales.length + 1,
-      product: product.name,
-      quantity,
-      total,
-      date: new Date(),
-    };
+    if (!product) return;
 
-    setRecentSales([newSale, ...recentSales]);
-    
-    // Reset form and close modal
-    setSelectedProduct('');
-    setQuantity(1);
-    setPrice(0);
-    setIsModalOpen(false);
+    // Check if enough stock
+    if (quantity > product.stock) {
+      setError(`Only ${product.stock} units available in stock`);
+      return;
+    }
+
+    try {
+      setError('');
+      const newSale = {
+        user_id: user.id,
+        product_id: product.id,
+        product_name: product.name,
+        quantity: quantity,
+        price: price,
+        total: total,
+      };
+
+      const { data, error } = await supabase
+        .from('sales')
+        .insert([newSale])
+        .select();
+
+      if (error) throw error;
+
+      // Add new sale to the list
+      setRecentSales([data[0], ...recentSales]);
+      
+      // Update product stock in the products list
+      setProducts(products.map(p => 
+        p.id === product.id 
+          ? { ...p, stock: p.stock - quantity }
+          : p
+      ));
+      
+      // Reset form and close modal
+      setSelectedProduct('');
+      setQuantity(1);
+      setPrice(0);
+      setIsModalOpen(false);
+    } catch (err) {
+      setError(err.message);
+      console.error('Error recording sale:', err);
+    }
   };
 
   const resetForm = () => {
     setSelectedProduct('');
     setQuantity(1);
     setPrice(0);
+    setError('');
   };
 
   // Filter sales based on search and filters
   const filteredSales = recentSales.filter(sale => {
     // Search filter
-    const matchesSearch = sale.product.toLowerCase().includes(searchTerm.toLowerCase());
+    const matchesSearch = sale.product_name?.toLowerCase().includes(searchTerm.toLowerCase());
     
     // Product filter
-    const matchesProduct = productFilter === 'all' || sale.product === productFilter;
+    const matchesProduct = productFilter === 'all' || sale.product_name === productFilter;
     
     // Date filter
     let matchesDate = true;
@@ -111,42 +155,50 @@ export const Sales = () => {
     const yesterday = new Date(Date.now() - 86400000).toDateString();
     
     if (dateFilter === 'today') {
-      matchesDate = sale.date.toDateString() === today;
+      matchesDate = new Date(sale.created_at).toDateString() === today;
     } else if (dateFilter === 'yesterday') {
-      matchesDate = sale.date.toDateString() === yesterday;
+      matchesDate = new Date(sale.created_at).toDateString() === yesterday;
     } else if (dateFilter === 'thisWeek') {
       const oneWeekAgo = new Date(Date.now() - 7 * 86400000);
-      matchesDate = sale.date >= oneWeekAgo;
+      matchesDate = new Date(sale.created_at) >= oneWeekAgo;
     }
     
     return matchesSearch && matchesProduct && matchesDate;
   });
 
   const columns = [
-    { header: 'Product', accessor: 'product' },
+    { header: 'Product', accessor: 'product_name' },
     { header: 'Quantity', accessor: 'quantity' },
     {
       header: 'Total',
       accessor: 'total',
-      cell: (value) => `K${value.toFixed(2)}`,
+      cell: (value) => `K${value?.toFixed(2) || '0.00'}`,
     },
     {
       header: 'Date',
-      accessor: 'date',
-      cell: (value) => format(value, 'MMM dd, yyyy HH:mm'),
+      accessor: 'created_at',
+      cell: (value) => format(new Date(value), 'MMM dd, yyyy HH:mm'),
     },
   ];
 
   // Calculate today's stats
   const today = new Date().toDateString();
   const todaySales = recentSales.filter(sale => 
-    sale.date.toDateString() === today
+    new Date(sale.created_at).toDateString() === today
   );
-  const totalSalesToday = todaySales.reduce((sum, sale) => sum + sale.total, 0);
+  const totalSalesToday = todaySales.reduce((sum, sale) => sum + (sale.total || 0), 0);
   const transactionsToday = todaySales.length;
 
   // Get unique products for filter dropdown
-  const uniqueProducts = ['all', ...new Set(recentSales.map(sale => sale.product))];
+  const uniqueProducts = ['all', ...new Set(recentSales.map(sale => sale.product_name))];
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-96">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-500"></div>
+      </div>
+    );
+  }
 
   return (
     <div className="p-6 space-y-6">
@@ -162,6 +214,17 @@ export const Sales = () => {
         </Button>
       </div>
 
+      {/* Error Message */}
+      {error && (
+        <div className="bg-red-50 border border-red-200 rounded-lg p-4 flex items-start gap-3">
+          <AlertCircle className="text-red-500 mt-0.5" size={18} />
+          <div>
+            <p className="text-sm text-red-700 font-medium">Error</p>
+            <p className="text-sm text-red-600">{error}</p>
+          </div>
+        </div>
+      )}
+
       {/* Today's Summary - Horizontal Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         {/* Total Sales Today */}
@@ -174,7 +237,7 @@ export const Sales = () => {
                   K{totalSalesToday.toFixed(2)}
                 </p>
               </div>
-              <div className="p-1 bg-green-100 rounded-full">
+              <div className="p-3 bg-green-100 rounded-full">
                 <DollarSign className="text-green-600" size={24} />
               </div>
             </div>
@@ -191,7 +254,7 @@ export const Sales = () => {
                   {transactionsToday}
                 </p>
               </div>
-              <div className="p-1 bg-blue-100 rounded-lg">
+              <div className="p-3 bg-blue-100 rounded-full">
                 <ShoppingCart className="text-blue-600" size={24} />
               </div>
             </div>
@@ -210,7 +273,7 @@ export const Sales = () => {
                     : '0.00'}
                 </p>
               </div>
-              <div className="p-1 bg-purple-100 rounded-lg">
+              <div className="p-3 bg-purple-100 rounded-full">
                 <TrendingUp className="text-purple-600" size={24} />
               </div>
             </div>
@@ -227,7 +290,7 @@ export const Sales = () => {
                   {todaySales.reduce((sum, sale) => sum + sale.quantity, 0)}
                 </p>
               </div>
-              <div className="p-1 bg-orange-100 rounded-lg">
+              <div className="p-3 bg-orange-100 rounded-full">
                 <ShoppingCart className="text-orange-600" size={24} />
               </div>
             </div>
@@ -282,8 +345,8 @@ export const Sales = () => {
         <CardHeader>
           <div className="flex items-center justify-between">
             <h2 className="text-lg font-semibold">Recent Sales</h2>
-            <Button variant="ghost" size="sm">
-              View All
+            <Button variant="ghost" size="sm" onClick={fetchSales}>
+              Refresh
             </Button>
           </div>
         </CardHeader>
