@@ -31,7 +31,6 @@ export const Inventory = () => {
       const { data, error } = await supabase
         .from('user_settings')
         .select('low_stock_threshold, critical_stock_threshold')
-        .eq('user_id', user.id)
         .single();
 
       if (error && error.code !== 'PGRST116') throw error;
@@ -64,7 +63,6 @@ export const Inventory = () => {
       let query = supabase
         .from('products')
         .select('id, name, category, stock, updated_at')
-        .eq('user_id', user.id);
 
       const { data, error } = await query.order('name');
 
@@ -115,7 +113,6 @@ export const Inventory = () => {
           event: '*',
           schema: 'public',
           table: 'products',
-          filter: `user_id=eq.${user.id}`,
         },
         () => {
           // Refetch inventory when changes occur

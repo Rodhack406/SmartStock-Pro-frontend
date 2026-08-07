@@ -40,7 +40,6 @@ export const Products = () => {
       const { data, error } = await supabase
         .from('user_settings')
         .select('low_stock_threshold, critical_stock_threshold')
-        .eq('user_id', user.id)
         .single();
 
       if (error && error.code !== 'PGRST116') throw error;
@@ -63,7 +62,6 @@ export const Products = () => {
       const { data, error } = await supabase
         .from('products')
         .select('*')
-        .eq('user_id', user.id)
         .order('created_at', { ascending: false });
 
       if (error) throw error;
@@ -106,7 +104,6 @@ export const Products = () => {
     try {
       setError('');
       const newProduct = {
-        user_id: user.id,
         name: formData.name,
         description: formData.description,
         category: formData.category,
@@ -161,7 +158,6 @@ export const Products = () => {
         .from('products')
         .update(updatedProduct)
         .eq('id', editingProduct.id)
-        .eq('user_id', user.id)
         .select();
 
       if (error) throw error;
@@ -186,7 +182,6 @@ export const Products = () => {
         .from('products')
         .delete()
         .eq('id', id)
-        .eq('user_id', user.id);
 
       if (error) throw error;
 

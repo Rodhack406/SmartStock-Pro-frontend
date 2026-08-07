@@ -5,7 +5,7 @@ import { Input } from '../components/ui/Input';
 import { Select } from '../components/ui/Select';
 import { Table } from '../components/ui/Table';
 import { Modal } from '../components/ui/Modal';
-import { ShoppingCart, DollarSign, Plus, TrendingUp, Search, Calendar, AlertCircle } from 'lucide-react';
+import { ShoppingCart, DollarSign, Plus, Search, Calendar, AlertCircle } from 'lucide-react';
 import { format } from 'date-fns';
 import { supabase } from '../services/supabase';
 import { useAuth } from '../hooks/AuthContext';
@@ -32,7 +32,6 @@ export const Sales = () => {
       const { data, error } = await supabase
         .from('products')
         .select('id, name, price, stock')
-        .eq('user_id', user.id)
         .gt('stock', 0)
         .order('name');
 
@@ -44,19 +43,35 @@ export const Sales = () => {
     }
   };
 
-  // Fetch sales from Supabase
+  // Fetch sales from Supabase with product name
   const fetchSales = async () => {
     try {
       setLoading(true);
       const { data, error } = await supabase
         .from('sales')
-        .select('*')
-        .eq('user_id', user.id)
+        .select(`
+          id,
+          product_id,
+          quantity,
+          price,
+          total,
+          created_at,
+          products:product_id (
+            name
+          )
+        `)
         .order('created_at', { ascending: false })
         .limit(50);
 
       if (error) throw error;
-      setRecentSales(data || []);
+      
+      // Transform data to include product_name
+      const transformedSales = data.map(sale => ({
+        ...sale,
+        product_name: sale.products?.name || 'Unknown Product'
+      }));
+      
+      setRecentSales(transformedSales);
     } catch (err) {
       console.error('Error fetching sales:', err);
       setError('Failed to load sales');
@@ -98,9 +113,7 @@ export const Sales = () => {
     try {
       setError('');
       const newSale = {
-        user_id: user.id,
         product_id: product.id,
-        product_name: product.name,
         quantity: quantity,
         price: price,
         total: total,
@@ -109,12 +122,28 @@ export const Sales = () => {
       const { data, error } = await supabase
         .from('sales')
         .insert([newSale])
-        .select();
+        .select(`
+          id,
+          product_id,
+          quantity,
+          price,
+          total,
+          created_at,
+          products:product_id (
+            name
+          )
+        `);
 
       if (error) throw error;
 
+      // Transform the new sale to include product_name
+      const newSaleWithName = {
+        ...data[0],
+        product_name: data[0].products?.name || 'Unknown Product'
+      };
+
       // Add new sale to the list
-      setRecentSales([data[0], ...recentSales]);
+      setRecentSales([newSaleWithName, ...recentSales]);
       
       // Update product stock in the products list
       setProducts(products.map(p => 
@@ -181,16 +210,16 @@ export const Sales = () => {
     },
   ];
 
-  // Calculate today's stats
+  // Calculate today's stats - just count entries
   const today = new Date().toDateString();
   const todaySales = recentSales.filter(sale => 
     new Date(sale.created_at).toDateString() === today
   );
-  const totalSalesToday = todaySales.reduce((sum, sale) => sum + (sale.total || 0), 0);
-  const transactionsToday = todaySales.length;
+  const totalSalesToday = todaySales.length; // Just count the sales
+  const productsSoldToday = todaySales.reduce((sum, sale) => sum + sale.quantity, 0);
 
   // Get unique products for filter dropdown
-  const uniqueProducts = ['all', ...new Set(recentSales.map(sale => sale.product_name))];
+  const uniqueProducts = ['all', ...new Set(recentSales.map(sale => sale.product_name).filter(Boolean))];
 
   if (loading) {
     return (
@@ -226,72 +255,37 @@ export const Sales = () => {
       )}
 
       {/* Today's Summary - Horizontal Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        {/* Total Sales Today */}
-        <Card className="hover:shadow-md transition-shadow">
-          <CardBody>
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-gray-500">Total Sales Today</p>
-                <p className="text-2xl font-bold text-gray-900 mt-1">
-                  K{totalSalesToday.toFixed(2)}
-                </p>
-              </div>
-              <div className="p-3 bg-green-100 rounded-full">
-                <DollarSign className="text-green-600" size={24} />
-              </div>
-            </div>
-          </CardBody>
-        </Card>
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-2 gap-4">
 
-        {/* Transactions Today */}
-        <Card className="hover:shadow-md transition-shadow">
-          <CardBody>
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-gray-500">Transactions Today</p>
-                <p className="text-2xl font-bold text-gray-900 mt-1">
-                  {transactionsToday}
-                </p>
-              </div>
-              <div className="p-3 bg-blue-100 rounded-full">
-                <ShoppingCart className="text-blue-600" size={24} />
-              </div>
-            </div>
-          </CardBody>
-        </Card>
-
-        {/* Average Order Value */}
-        <Card className="hover:shadow-md transition-shadow">
-          <CardBody>
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-gray-500">Avg. Order Value</p>
-                <p className="text-2xl font-bold text-gray-900 mt-1">
-                  K{transactionsToday > 0 
-                    ? (totalSalesToday / transactionsToday).toFixed(2) 
-                    : '0.00'}
-                </p>
-              </div>
-              <div className="p-3 bg-purple-100 rounded-full">
-                <TrendingUp className="text-purple-600" size={24} />
-              </div>
-            </div>
-          </CardBody>
-        </Card>
-
-        {/* Total Products Sold */}
+        {/* Products Sold Today */}
         <Card className="hover:shadow-md transition-shadow">
           <CardBody>
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm text-gray-500">Products Sold Today</p>
                 <p className="text-2xl font-bold text-gray-900 mt-1">
-                  {todaySales.reduce((sum, sale) => sum + sale.quantity, 0)}
+                  {productsSoldToday}
                 </p>
               </div>
               <div className="p-3 bg-orange-100 rounded-full">
                 <ShoppingCart className="text-orange-600" size={24} />
+              </div>
+            </div>
+          </CardBody>
+        </Card>
+
+        {/* Total Sales Value Today */}
+        <Card className="hover:shadow-md transition-shadow">
+          <CardBody>
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-gray-500">Sales Value Today</p>
+                <p className="text-2xl font-bold text-gray-900 mt-1">
+                  K{todaySales.reduce((sum, sale) => sum + (sale.total || 0), 0).toFixed(2)}
+                </p>
+              </div>
+              <div className="p-3 bg-purple-100 rounded-full">
+                <DollarSign className="text-purple-600" size={24} />
               </div>
             </div>
           </CardBody>

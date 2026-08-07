@@ -26,7 +26,6 @@ export const Settings = () => {
       const { data, error } = await supabase
         .from('user_settings')
         .select('low_stock_threshold, critical_stock_threshold')
-        .eq('user_id', user.id)
         .single();
 
       if (error && error.code !== 'PGRST116') throw error;
@@ -58,7 +57,6 @@ export const Settings = () => {
       setSuccess('');
 
       const settingsData = {
-        user_id: user.id,
         low_stock_threshold: parseInt(settings.lowStockThreshold),
         critical_stock_threshold: parseInt(settings.criticalStockThreshold),
         updated_at: new Date(),
@@ -68,7 +66,6 @@ export const Settings = () => {
       const { data: existingSettings } = await supabase
         .from('user_settings')
         .select('id')
-        .eq('user_id', user.id)
         .single();
 
       let error;
@@ -77,7 +74,7 @@ export const Settings = () => {
         const { error: updateError } = await supabase
           .from('user_settings')
           .update(settingsData)
-          .eq('user_id', user.id);
+          .eq('id', existingSettings.id)
         error = updateError;
       } else {
         // Insert new settings
